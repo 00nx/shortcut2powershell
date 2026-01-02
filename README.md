@@ -1,12 +1,13 @@
-# Shortcut to PowerShell
+# Shortcut2PowerShell
 
-A quick, clean way to create a **Windows shortcut (.lnk)** that launches **PowerShell** with custom options (hidden window, bypass execution policy, etc.).
+A quick, clean way to create a **Windows shortcut (.lnk) file** that launches **PowerShell** with custom options (hidden window, bypass execution policy, etc.).
 
 features :
 
 1. hidden extension
-2. using braille spacetype to hide the original .lnk
+2. extension spoofing ( pdf, mp4, png .etc )
 3. silent execution
+4. undetectable for now
 
 
 ## installation
